@@ -78,6 +78,7 @@ def get_latest_comment(channel_id):
 data = load_data()
 
 print("🤖 Бот запущен")
+send_message("✅ Бот успешно запущен на сервере")
 
 while True:
     # --- подписчики ---
