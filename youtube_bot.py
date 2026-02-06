@@ -1,24 +1,25 @@
 import requests
-import time
 import json
 import os
+import subprocess
 
-# ================= НАСТРОЙКИ =================
+# ================= ENV =================
 
-TELEGRAM_TOKEN = "ТВОЙ_TELEGRAM_TOKEN"
-CHAT_ID = "ТВОЙ_CHAT_ID"
-YOUTUBE_API_KEY = "ТВОЙ_YOUTUBE_API_KEY"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# Твой канал
 CHANNEL_ID = "UCz8I98K4RO_Yrj1LKNmqUVA"
-
 DATA_FILE = "data.json"
 
 # ================= TELEGRAM =================
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text})
+    requests.post(url, json={
+        "chat_id": CHAT_ID,
+        "text": text
+    })
 
 # ================= DATA =================
 
@@ -31,6 +32,19 @@ def load_data():
 def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f)
+
+# ⭐ сохраняем data.json обратно в GitHub
+def push_data_to_repo():
+    try:
+        subprocess.run(["git", "config", "--global", "user.email", "action@github.com"])
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
+
+        subprocess.run(["git", "add", DATA_FILE])
+        subprocess.run(["git", "commit", "-m", "update data.json"], check=False)
+        subprocess.run(["git", "push"])
+        print("✅ data.json обновлён в репозитории")
+    except Exception as e:
+        print("❌ push error:", e)
 
 # ================= YOUTUBE =================
 
@@ -48,7 +62,6 @@ def get_subscribers(channel_id):
         return None
 
     return int(r["items"][0]["statistics"]["subscriberCount"])
-
 
 def get_latest_comment(channel_id):
     url = "https://www.googleapis.com/youtube/v3/commentThreads"
@@ -75,18 +88,19 @@ def get_latest_comment(channel_id):
 
 # ================= MAIN =================
 
-data = load_data()
+def main():
+    print("🤖 Проверка канала...")
 
-print("🤖 Бот запущен")
-send_message("✅ Бот успешно запущен на сервере")
+    data = load_data()
 
-while True:
     # --- подписчики ---
     subs = get_subscribers(CHANNEL_ID)
 
     if subs is not None:
         if data.get("subs") is None:
             data["subs"] = subs
+            print("INIT subs:", subs)
+
         elif subs > data["subs"]:
             send_message(
                 f"🎉 Новый подписчик!\n"
@@ -106,4 +120,9 @@ while True:
         data["last_comment_id"] = comment["id"]
 
     save_data(data)
-    time.sleep(180)  # 10 минут
+    push_data_to_repo()
+
+    print("✅ Проверка завершена")
+
+if __name__ == "__main__":
+    main()
