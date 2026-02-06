@@ -16,10 +16,7 @@ DATA_FILE = "data.json"
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": CHAT_ID,
-        "text": text
-    })
+    requests.post(url, json={"chat_id": CHAT_ID, "text": text})
 
 # ================= DATA =================
 
@@ -33,96 +30,106 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f)
 
-# ⭐ сохраняем data.json обратно в GitHub
-def push_data_to_repo():
-    try:
-        subprocess.run(["git", "config", "--global", "user.email", "action@github.com"])
-        subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
+def push_if_changed():
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True
+    )
 
-        subprocess.run(["git", "add", DATA_FILE])
-        subprocess.run(["git", "commit", "-m", "update data.json"], check=False)
-        subprocess.run(["git", "push"])
-        print("✅ data.json обновлён в репозитории")
-    except Exception as e:
-        print("❌ push error:", e)
+    if result.stdout.strip() == "":
+        print("🟢 Нет изменений")
+        return
+
+    subprocess.run(["git", "config", "--global", "user.email", "action@github.com"])
+    subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
+    subprocess.run(["git", "add", DATA_FILE])
+    subprocess.run(["git", "commit", "-m", "update data.json"], check=False)
+    subprocess.run(["git", "push"])
+
+    print("🚀 data.json обновлён")
 
 # ================= YOUTUBE =================
 
-def get_subscribers(channel_id):
+def get_channel_data(channel_id):
     url = "https://www.googleapis.com/youtube/v3/channels"
     params = {
-        "part": "statistics",
+        "part": "statistics,contentDetails",
         "id": channel_id,
         "key": YOUTUBE_API_KEY
     }
 
-    r = requests.get(url, params=params).json()
+    r = requests.get(url, params=params, timeout=10).json()
 
     if "items" not in r or len(r["items"]) == 0:
-        return None
+        return None, None
 
-    return int(r["items"][0]["statistics"]["subscriberCount"])
+    item = r["items"][0]
 
-def get_latest_comment(channel_id):
-    url = "https://www.googleapis.com/youtube/v3/commentThreads"
+    subs = int(item["statistics"]["subscriberCount"])
+    uploads_playlist = item["contentDetails"]["relatedPlaylists"]["uploads"]
+
+    return subs, uploads_playlist
+
+
+def get_latest_video(playlist_id):
+    url = "https://www.googleapis.com/youtube/v3/playlistItems"
     params = {
         "part": "snippet",
-        "allThreadsRelatedToChannelId": channel_id,
-        "order": "time",
+        "playlistId": playlist_id,
         "maxResults": 1,
         "key": YOUTUBE_API_KEY
     }
 
-    r = requests.get(url, params=params).json()
+    r = requests.get(url, params=params, timeout=10).json()
 
     if "items" not in r or len(r["items"]) == 0:
         return None
 
-    snippet = r["items"][0]["snippet"]["topLevelComment"]["snippet"]
+    item = r["items"][0]["snippet"]
 
     return {
-        "id": r["items"][0]["id"],
-        "author": snippet["authorDisplayName"],
-        "text": snippet["textDisplay"]
+        "id": item["resourceId"]["videoId"],
+        "title": item["title"]
     }
 
 # ================= MAIN =================
 
 def main():
-    print("🤖 Проверка канала...")
+    print("⚡ ULTRA+ проверка")
 
     data = load_data()
+    changed = False
 
-    # --- подписчики ---
-    subs = get_subscribers(CHANNEL_ID)
+    subs, uploads_playlist = get_channel_data(CHANNEL_ID)
 
     if subs is not None:
         if data.get("subs") is None:
             data["subs"] = subs
-            print("INIT subs:", subs)
-
+            changed = True
         elif subs > data["subs"]:
-            send_message(
-                f"🎉 Новый подписчик!\n"
-                f"Всего подписчиков: {subs}"
-            )
+            send_message(f"🎉 Новый подписчик! Всего: {subs}")
             data["subs"] = subs
+            changed = True
 
-    # --- комментарии ---
-    comment = get_latest_comment(CHANNEL_ID)
+    if uploads_playlist:
+        video = get_latest_video(uploads_playlist)
 
-    if comment and data.get("last_comment_id") != comment["id"]:
-        send_message(
-            f"💬 Новый комментарий\n"
-            f"Автор: {comment['author']}\n"
-            f"Текст: {comment['text']}"
-        )
-        data["last_comment_id"] = comment["id"]
+        if video and data.get("last_video_id") != video["id"]:
+            send_message(
+                f"📺 Новое видео на канале!\n{video['title']}\n"
+                f"https://youtu.be/{video['id']}"
+            )
+            data["last_video_id"] = video["id"]
+            changed = True
 
-    save_data(data)
-    push_data_to_repo()
+    if changed:
+        save_data(data)
+        push_if_changed()
+    else:
+        print("🟢 Ничего нового")
 
-    print("✅ Проверка завершена")
+    print("✅ ULTRA+ завершено")
 
 if __name__ == "__main__":
     main()
